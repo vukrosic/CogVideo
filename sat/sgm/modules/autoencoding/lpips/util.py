@@ -56,8 +56,9 @@ class ActNorm(nn.Module):
     def initialize(self, input):
         with torch.no_grad():
             flatten = input.permute(1, 0, 2, 3).contiguous().view(input.shape[1], -1)
-            mean = flatten.mean(1).unsqueeze(1).unsqueeze(2).unsqueeze(3).permute(1, 0, 2, 3)
-            std = flatten.std(1).unsqueeze(1).unsqueeze(2).unsqueeze(3).permute(1, 0, 2, 3)
+            # OPTIMIZATION: Direct reshape to (1, C, 1, 1) instead of 3 unsqueezes + permute
+            mean = flatten.mean(1).view(1, -1, 1, 1)
+            std = flatten.std(1).view(1, -1, 1, 1)
 
             self.loc.data.copy_(-mean)
             self.scale.data.copy_(1 / (std + 1e-6))
@@ -85,7 +86,8 @@ class ActNorm(nn.Module):
         if self.logdet:
             log_abs = torch.log(torch.abs(self.scale))
             logdet = height * width * torch.sum(log_abs)
-            logdet = logdet * torch.ones(input.shape[0]).to(input)
+            # OPTIMIZATION: Use expand instead of creating new tensor + device transfer
+            logdet = logdet.unsqueeze(0).expand(input.shape[0])
             return h, logdet
 
         return h

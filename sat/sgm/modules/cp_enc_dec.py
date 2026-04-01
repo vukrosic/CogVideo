@@ -43,8 +43,8 @@ def get_timestep_embedding(timesteps, embedding_dim):
 
     half_dim = embedding_dim // 2
     emb = math.log(10000) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
-    emb = emb.to(device=timesteps.device)
+    # OPTIMIZATION: Create tensor directly on device instead of CPU then transfer
+    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=timesteps.device) * -emb)
     emb = timesteps.float()[:, None] * emb[None, :]
     emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
     if embedding_dim % 2 == 1:  # zero pad
@@ -53,8 +53,8 @@ def get_timestep_embedding(timesteps, embedding_dim):
 
 
 def nonlinearity(x):
-    # swish
-    return x * torch.sigmoid(x)
+    # OPTIMIZATION: Use F.silu (optimized CUDA kernel) instead of x * torch.sigmoid(x)
+    return torch.nn.functional.silu(x)
 
 
 def leaky_relu(p=0.1):

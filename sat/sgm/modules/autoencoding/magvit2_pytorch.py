@@ -246,7 +246,8 @@ class SqueezeExcite(Module):
         context = rearrange(context, "b c h w -> b c (h w)").softmax(dim=-1)
         spatial_flattened_input = rearrange(x, "b c h w -> b c (h w)")
 
-        out = einsum("b i n, b c n -> b c i", context, spatial_flattened_input)
+        # OPTIMIZATION: Replace einsum with bmm (more efficient)
+        out = torch.bmm(context.transpose(-2, -1), spatial_flattened_input)  # (b, n, c) @ (b, c, n) -> (b, c, c)
         out = rearrange(out, "... -> ... 1")
         gates = self.net(out)
 
@@ -503,13 +504,15 @@ class Blur(Module):
         f = self.f
 
         if space_only:
-            f = einsum("i, j -> i j", f, f)
-            f = rearrange(f, "... -> 1 1 ...")
+            # OPTIMIZATION: Use torch.outer instead of einsum for outer product
+            f = torch.outer(f, f)  # (3,) outer (3,) -> (3, 3)
+            f = f[None, None, ...]  # equivalent to rearrange(f, "... -> 1 1 ...")
         elif time_only:
             f = rearrange(f, "f -> 1 f 1 1")
         else:
-            f = einsum("i, j, k -> i j k", f, f, f)
-            f = rearrange(f, "... -> 1 ...")
+            # OPTIMIZATION: Use broadcasting instead of einsum for 3D outer product
+            f = f[:, None, None] * f[None, :, None] * f[None, None, :]  # -> (3, 3, 3)
+            f = f[None, ...]  # equivalent to rearrange(f, "... -> 1 ...")
 
         is_images = x.ndim == 4
 
@@ -1700,8 +1703,9 @@ class VideoTokenizer(Module):
             assert exists(self.discr)
 
             # pick a random frame for image discriminator
+            # OPTIMIZATION: Use randint instead of randn+topk (much faster)
 
-            frame_indices = torch.randn((batch, frames)).topk(1, dim=-1).indices
+            frame_indices = torch.randint(0, frames, (batch, 1), device=video.device)
 
             real = pick_video_frame(video, frame_indices)
 
@@ -1756,7 +1760,8 @@ class VideoTokenizer(Module):
         # perceptual loss
 
         if self.use_vgg:
-            frame_indices = torch.randn((batch, frames)).topk(1, dim=-1).indices
+            # OPTIMIZATION: Use randint instead of randn+topk (much faster)
+            frame_indices = torch.randint(0, frames, (batch, 1), device=video.device)
 
             input_vgg_input = pick_video_frame(video, frame_indices)
             recon_vgg_input = pick_video_frame(recon_video, frame_indices)
@@ -1793,7 +1798,8 @@ class VideoTokenizer(Module):
         recon_video_frames = None
 
         if self.has_gan:
-            frame_indices = torch.randn((batch, frames)).topk(1, dim=-1).indices
+            # OPTIMIZATION: Use randint instead of randn+topk (much faster)
+            frame_indices = torch.randint(0, frames, (batch, 1), device=recon_video.device)
             recon_video_frames = pick_video_frame(recon_video, frame_indices)
 
             fake_logits = self.discr(recon_video_frames)

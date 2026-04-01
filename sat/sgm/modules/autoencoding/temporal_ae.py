@@ -70,9 +70,7 @@ class VideoResBlock(ResnetBlock):
         if not skip_video:
             x_mix = rearrange(x, "(b t) c h w -> b c t h w", t=timesteps)
 
-            x = rearrange(x, "(b t) c h w -> b c t h w", t=timesteps)
-
-            x = self.time_stack(x, temb)
+            x = self.time_stack(x_mix, temb)
 
             alpha = self.get_alpha(bs=b // timesteps)
             x = alpha * x + (1.0 - alpha) * x_mix

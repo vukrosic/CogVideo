@@ -49,12 +49,15 @@ def mixed_checkpoint(func, inputs: dict, params, flag):
     :param flag: if False, disable gradient checkpointing.
     """
     if flag:
-        tensor_keys = [key for key in inputs if isinstance(inputs[key], torch.Tensor)]
-        tensor_inputs = [inputs[key] for key in inputs if isinstance(inputs[key], torch.Tensor)]
-        non_tensor_keys = [key for key in inputs if not isinstance(inputs[key], torch.Tensor)]
-        non_tensor_inputs = [
-            inputs[key] for key in inputs if not isinstance(inputs[key], torch.Tensor)
-        ]
+        # OPTIMIZATION: Single-pass iteration instead of 4 separate iterations
+        tensor_keys, tensor_inputs, non_tensor_keys, non_tensor_inputs = [], [], [], []
+        for key, val in inputs.items():
+            if isinstance(val, torch.Tensor):
+                tensor_keys.append(key)
+                tensor_inputs.append(val)
+            else:
+                non_tensor_keys.append(key)
+                non_tensor_inputs.append(val)
         args = tuple(tensor_inputs) + tuple(non_tensor_inputs) + tuple(params)
         return MixedCheckpointFunction.apply(
             func,
@@ -202,9 +205,10 @@ def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False, dtyp
     """
     if not repeat_only:
         half = dim // 2
+        # OPTIMIZATION: Create tensor directly on device instead of CPU then transfer
         freqs = torch.exp(
-            -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
-        ).to(device=timesteps.device)
+            -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32, device=timesteps.device) / half
+        )
         args = timesteps[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
@@ -338,5 +342,7 @@ class AlphaBlender(nn.Module):
         image_only_indicator: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         alpha = self.get_alpha(image_only_indicator)
-        x = alpha.to(x_spatial.dtype) * x_spatial + (1.0 - alpha).to(x_spatial.dtype) * x_temporal
+        # OPTIMIZATION: Single dtype conversion instead of two (alpha is expanded, not copied)
+        alpha = alpha.to(x_spatial.dtype)
+        x = alpha * x_spatial + (1.0 - alpha) * x_temporal
         return x

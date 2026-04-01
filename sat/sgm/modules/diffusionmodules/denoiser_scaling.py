@@ -15,13 +15,20 @@ class DenoiserScaling(ABC):
 class EDMScaling:
     def __init__(self, sigma_data: float = 0.5):
         self.sigma_data = sigma_data
+        self.sigma_data_sq = sigma_data * sigma_data
 
     def __call__(
         self, sigma: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
-        c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2) ** 0.5
-        c_in = 1 / (sigma**2 + self.sigma_data**2) ** 0.5
+        # OPTIMIZATION: Compute shared expressions once
+        sigma_sq = sigma * sigma
+        sigma_sq_plus_data_sq = sigma_sq + self.sigma_data_sq
+        inv_sigma_sq_plus_data_sq = 1.0 / sigma_sq_plus_data_sq
+        sqrt_sigma_sq_plus_data_sq = sigma_sq_plus_data_sq ** 0.5
+
+        c_skip = self.sigma_data_sq * inv_sigma_sq_plus_data_sq
+        c_out = sigma * self.sigma_data / sqrt_sigma_sq_plus_data_sq
+        c_in = inv_sigma_sq_plus_data_sq * sigma_sq_plus_data_sq ** 0.5  # 1 / sqrt(...) = sqrt(...) / (...)
         c_noise = 0.25 * sigma.log()
         return c_skip, c_out, c_in, c_noise
 
@@ -32,7 +39,9 @@ class EpsScaling:
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         c_skip = torch.ones_like(sigma, device=sigma.device)
         c_out = -sigma
-        c_in = 1 / (sigma**2 + 1.0) ** 0.5
+        # OPTIMIZATION: Compute shared expression once
+        sqrt_sigma_sq_plus_1 = (sigma * sigma + 1.0) ** 0.5
+        c_in = 1.0 / sqrt_sigma_sq_plus_1
         c_noise = sigma.clone()
         return c_skip, c_out, c_in, c_noise
 
@@ -41,9 +50,14 @@ class VScaling:
     def __call__(
         self, sigma: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        c_skip = 1.0 / (sigma**2 + 1.0)
-        c_out = -sigma / (sigma**2 + 1.0) ** 0.5
-        c_in = 1.0 / (sigma**2 + 1.0) ** 0.5
+        # OPTIMIZATION: Compute shared expressions once
+        sigma_sq_plus_1 = sigma * sigma + 1.0
+        sqrt_sigma_sq_plus_1 = sigma_sq_plus_1 ** 0.5
+        inv_sigma_sq_plus_1 = 1.0 / sigma_sq_plus_1
+
+        c_skip = inv_sigma_sq_plus_1
+        c_out = -sigma / sqrt_sigma_sq_plus_1
+        c_in = 1.0 / sqrt_sigma_sq_plus_1
         c_noise = sigma.clone()
         return c_skip, c_out, c_in, c_noise
 
@@ -52,9 +66,14 @@ class VScalingWithEDMcNoise(DenoiserScaling):
     def __call__(
         self, sigma: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        c_skip = 1.0 / (sigma**2 + 1.0)
-        c_out = -sigma / (sigma**2 + 1.0) ** 0.5
-        c_in = 1.0 / (sigma**2 + 1.0) ** 0.5
+        # OPTIMIZATION: Compute shared expressions once
+        sigma_sq_plus_1 = sigma * sigma + 1.0
+        sqrt_sigma_sq_plus_1 = sigma_sq_plus_1 ** 0.5
+        inv_sigma_sq_plus_1 = 1.0 / sigma_sq_plus_1
+
+        c_skip = inv_sigma_sq_plus_1
+        c_out = -sigma / sqrt_sigma_sq_plus_1
+        c_in = 1.0 / sqrt_sigma_sq_plus_1
         c_noise = 0.25 * sigma.log()
         return c_skip, c_out, c_in, c_noise
 

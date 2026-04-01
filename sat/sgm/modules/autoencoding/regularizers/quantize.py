@@ -33,9 +33,8 @@ class AbstractQuantizer(AbstractRegularizer):
         new = match.argmax(-1)
         unknown = match.sum(2) < 1
         if self.unknown_index == "random":
-            new[unknown] = torch.randint(0, self.re_embed, size=new[unknown].shape).to(
-                device=new.device
-            )
+            # OPTIMIZATION: Use device arg instead of chained .to()
+            new[unknown] = torch.randint(0, self.re_embed, size=new[unknown].shape, device=new.device)
         else:
             new[unknown] = self.unknown_index
         return new.reshape(ishape)
@@ -240,11 +239,11 @@ class VectorQuantizer(AbstractQuantizer):
         z_flattened = z.view(-1, self.e_dim)
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
 
+        # OPTIMIZATION: Use matmul instead of einsum (clearer, same performance)
         d = (
             torch.sum(z_flattened**2, dim=1, keepdim=True)
             + torch.sum(self.embedding.weight**2, dim=1)
-            - 2
-            * torch.einsum("bd,dn->bn", z_flattened, rearrange(self.embedding.weight, "n d -> d n"))
+            - 2 * (z_flattened @ self.embedding.weight.t())
         )
 
         min_encoding_indices = torch.argmin(d, dim=1)
@@ -381,11 +380,12 @@ class EMAVectorQuantizer(AbstractQuantizer):
         z_flattened = z.reshape(-1, self.codebook_dim)
 
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
+        # OPTIMIZATION: Use matmul instead of einsum
         d = (
             z_flattened.pow(2).sum(dim=1, keepdim=True)
             + self.embedding.weight.pow(2).sum(dim=1)
-            - 2 * torch.einsum("bd,nd->bn", z_flattened, self.embedding.weight)
-        )  # 'n d -> d n'
+            - 2 * (z_flattened @ self.embedding.weight.t())
+        )
 
         encoding_indices = torch.argmin(d, dim=1)
 

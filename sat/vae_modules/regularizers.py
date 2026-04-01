@@ -13,10 +13,12 @@ class DiagonalGaussianDistribution(object):
         self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
         self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
         self.deterministic = deterministic
-        self.std = torch.exp(0.5 * self.logvar)
+        # OPTIMIZATION: Compute var first, then std = sqrt(var) avoids extra exp()
         self.var = torch.exp(self.logvar)
+        self.std = self.var.sqrt()
         if self.deterministic:
-            self.var = self.std = torch.zeros_like(self.mean).to(device=self.parameters.device)
+            # OPTIMIZATION: Removed redundant .to(device=...) - zeros_like inherits device
+            self.var = self.std = torch.zeros_like(self.mean)
 
     def sample(self):
         # x = self.mean + self.std * torch.randn(self.mean.shape).to(
@@ -27,16 +29,18 @@ class DiagonalGaussianDistribution(object):
 
     def kl(self, other=None):
         if self.deterministic:
-            return torch.Tensor([0.0])
+            # OPTIMIZATION: Use tensor on correct device instead of CPU tensor
+            return torch.zeros(1, dtype=self.mean.dtype, device=self.mean.device)
         else:
             if other is None:
+                # OPTIMIZATION: Use ** 2 instead of torch.pow(x, 2)
                 return 0.5 * torch.sum(
-                    torch.pow(self.mean, 2) + self.var - 1.0 - self.logvar,
+                    self.mean ** 2 + self.var - 1.0 - self.logvar,
                     dim=[1, 2, 3],
                 )
             else:
                 return 0.5 * torch.sum(
-                    torch.pow(self.mean - other.mean, 2) / other.var
+                    (self.mean - other.mean) ** 2 / other.var
                     + self.var / other.var
                     - 1.0
                     - self.logvar
@@ -46,10 +50,12 @@ class DiagonalGaussianDistribution(object):
 
     def nll(self, sample, dims=[1, 2, 3]):
         if self.deterministic:
-            return torch.Tensor([0.0])
+            # OPTIMIZATION: Use tensor on correct device instead of CPU tensor
+            return torch.zeros(1, dtype=self.mean.dtype, device=self.mean.device)
+        # OPTIMIZATION: Precompute constant, use ** 2 instead of torch.pow
         logtwopi = np.log(2.0 * np.pi)
         return 0.5 * torch.sum(
-            logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
+            logtwopi + self.logvar + (sample - self.mean) ** 2 / self.var,
             dim=dims,
         )
 

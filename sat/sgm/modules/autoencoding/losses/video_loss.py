@@ -91,12 +91,14 @@ class Blur(nn.Module):
         f = self.f
 
         if space_only:
-            f = einsum("i, j -> i j", f, f)
+            # OPTIMIZATION: Use torch.outer instead of einsum for outer product
+            f = torch.outer(f, f)
             f = rearrange(f, "... -> 1 1 ...")
         elif time_only:
             f = rearrange(f, "f -> 1 f 1 1")
         else:
-            f = einsum("i, j, k -> i j k", f, f, f)
+            # OPTIMIZATION: Use broadcasting instead of einsum for 3D outer product
+            f = f[:, None, None] * f[None, :, None] * f[None, None, :]
             f = rearrange(f, "... -> 1 ...")
 
         is_images = x.ndim == 4
@@ -590,7 +592,8 @@ class VideoAutoencoderLoss(nn.Module):
             recon_loss = F.mse_loss(inputs, reconstructions)
 
             if self.perceptual_weight > 0:
-                frame_indices = torch.randn((batch, frames)).topk(1, dim=-1).indices
+                # OPTIMIZATION: Use randint instead of randn+topk (eliminates O(batch*frames) random samples)
+                frame_indices = torch.randint(0, frames, (batch, 1), device=inputs.device)
 
                 input_frames = pick_video_frame(inputs, frame_indices)
                 recon_frames = pick_video_frame(reconstructions, frame_indices)

@@ -189,7 +189,8 @@ def load_video(
     temp_frms = vr.get_batch(np.arange(start, end))
     assert temp_frms is not None
     tensor_frms = torch.from_numpy(temp_frms) if type(temp_frms) is not torch.Tensor else temp_frms
-    tensor_frms = tensor_frms[torch.tensor((indices - start).tolist())]
+    # OPTIMIZATION: Use torch.from_numpy directly instead of torch.tensor with .tolist()
+    tensor_frms = tensor_frms[torch.from_numpy(indices - start)]
 
     return pad_last_frame(tensor_frms, num_frames)
 
@@ -409,7 +410,8 @@ class SFTDataset(Dataset):
             tensor_frms = (
                 torch.from_numpy(temp_frms) if type(temp_frms) is not torch.Tensor else temp_frms
             )
-            tensor_frms = tensor_frms[torch.tensor((indices - start).tolist())]
+            # OPTIMIZATION: Use torch.from_numpy directly instead of torch.tensor with .tolist()
+            tensor_frms = tensor_frms[torch.from_numpy(indices - start)]
         else:
             if ori_vlen > self.max_num_frames:
                 num_frames = self.max_num_frames
@@ -423,7 +425,8 @@ class SFTDataset(Dataset):
                     if type(temp_frms) is not torch.Tensor
                     else temp_frms
                 )
-                tensor_frms = tensor_frms[torch.tensor((indices - start).tolist())]
+                # OPTIMIZATION: Use torch.from_numpy directly instead of torch.tensor with .tolist()
+                tensor_frms = tensor_frms[torch.from_numpy(indices - start)]
             else:
 
                 def nearest_smaller_4k_plus_1(n):

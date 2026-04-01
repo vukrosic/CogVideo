@@ -283,9 +283,10 @@ class Rotary3DPositionEmbeddingMixin(BaseMixin):
         grid_h = torch.arange(height, dtype=torch.float32)
         grid_w = torch.arange(width, dtype=torch.float32)
 
-        freqs_t = torch.einsum("..., f -> ... f", grid_t, freqs_t)
-        freqs_h = torch.einsum("..., f -> ... f", grid_h, freqs_h)
-        freqs_w = torch.einsum("..., f -> ... f", grid_w, freqs_w)
+        # OPTIMIZATION: Use broadcasting instead of einsum for outer product
+        freqs_t = grid_t[:, None] * freqs_t[None, :]  # outer product via broadcasting
+        freqs_h = grid_h[:, None] * freqs_h[None, :]
+        freqs_w = grid_w[:, None] * freqs_w[None, :]
 
         freqs_t = repeat(freqs_t, "... n -> ... (n r)", r=2)
         freqs_h = repeat(freqs_h, "... n -> ... (n r)", r=2)

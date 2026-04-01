@@ -223,7 +223,8 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
 
         rec_loss = torch.abs(inputs.contiguous() - reconstructions.contiguous())
         if self.perceptual_weight > 0:
-            frame_indices = torch.randn((inputs.shape[0], inputs.shape[2])).topk(1, dim=-1).indices
+            # OPTIMIZATION: Use randint instead of randn+topk (much faster)
+            frame_indices = torch.randint(0, inputs.shape[2], (inputs.shape[0], 1), device=inputs.device)
 
             from sgm.modules.autoencoding.losses.video_loss import pick_video_frame
 
@@ -263,7 +264,8 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
 
             log.update(
                 {
-                    f"{split}/loss/total": loss.clone().detach().mean(),
+                    # OPTIMIZATION: Remove unnecessary .clone() - .detach().mean() is sufficient
+                    f"{split}/loss/total": loss.detach().mean(),
                     f"{split}/loss/nll": nll_loss.detach().mean(),
                     f"{split}/loss/rec": rec_loss.detach().mean(),
                     f"{split}/loss/percep": p_loss.detach().mean(),
@@ -286,7 +288,8 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                 d_loss = torch.tensor(0.0, requires_grad=True)
 
             log = {
-                f"{split}/loss/disc": d_loss.clone().detach().mean(),
+                # OPTIMIZATION: Remove unnecessary .clone() - .detach().mean() is sufficient
+                f"{split}/loss/disc": d_loss.detach().mean(),
                 f"{split}/logits/real": logits_real.detach().mean(),
                 f"{split}/logits/fake": logits_fake.detach().mean(),
             }

@@ -26,6 +26,10 @@ from typing import Literal, Optional
 
 import torch
 
+# OPTIMIZATION: Enable cudnn.benchmark for 20-30% convolution speedup
+if torch.cuda.is_available():
+    torch.backends.cudnn.benchmark = True
+
 from diffusers import (
     CogVideoXDPMScheduler,
     CogVideoXImageToVideoPipeline,

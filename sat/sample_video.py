@@ -70,37 +70,42 @@ def get_batch(keys, value_dict, N: Union[List, ListConfig], T=None, device="cuda
                 .repeat(*N, 1)
             )
         elif key == "aesthetic_score":
-            batch["aesthetic_score"] = (
-                torch.tensor([value_dict["aesthetic_score"]]).to(device).repeat(*N, 1)
+            # OPTIMIZATION: Use torch.full with device instead of tensor.to().repeat()
+            batch["aesthetic_score"] = torch.full(
+                (*N, 1), value_dict["aesthetic_score"], dtype=torch.long, device=device
             )
-            batch_uc["aesthetic_score"] = (
-                torch.tensor([value_dict["negative_aesthetic_score"]]).to(device).repeat(*N, 1)
+            batch_uc["aesthetic_score"] = torch.full(
+                (*N, 1), value_dict["negative_aesthetic_score"], dtype=torch.long, device=device
             )
 
         elif key == "target_size_as_tuple":
-            batch["target_size_as_tuple"] = (
-                torch.tensor([value_dict["target_height"], value_dict["target_width"]])
-                .to(device)
-                .repeat(*N, 1)
+            # OPTIMIZATION: Use torch.full with device instead of tensor.to().repeat()
+            batch["target_size_as_tuple"] = torch.full(
+                (*N, 2),
+                dtype=torch.long,
+                device=device,
+                fill_value=value_dict["target_height"] if value_dict["target_width"] is not None else 0,
             )
+            # Actually for 2 values, let's keep the original approach but optimize
+            batch["target_size_as_tuple"] = torch.tensor(
+                [value_dict["target_height"], value_dict["target_width"]],
+                device=device,
+            ).repeat(*N, 1)
         elif key == "fps":
-            batch[key] = torch.tensor([value_dict["fps"]]).to(device).repeat(math.prod(N))
+            batch[key] = torch.full((math.prod(N),), value_dict["fps"], dtype=torch.long, device=device)
         elif key == "fps_id":
-            batch[key] = torch.tensor([value_dict["fps_id"]]).to(device).repeat(math.prod(N))
+            batch[key] = torch.full((math.prod(N),), value_dict["fps_id"], dtype=torch.long, device=device)
         elif key == "motion_bucket_id":
-            batch[key] = (
-                torch.tensor([value_dict["motion_bucket_id"]]).to(device).repeat(math.prod(N))
+            batch[key] = torch.full(
+                (math.prod(N),), value_dict["motion_bucket_id"], dtype=torch.long, device=device
             )
         elif key == "pool_image":
             batch[key] = repeat(value_dict[key], "1 ... -> b ...", b=math.prod(N)).to(
                 device, dtype=torch.half
             )
         elif key == "cond_aug":
-            batch[key] = repeat(
-                torch.tensor([value_dict["cond_aug"]]).to("cuda"),
-                "1 -> b",
-                b=math.prod(N),
-            )
+            # OPTIMIZATION: Use torch.full with device instead of tensor.to("cuda")
+            batch[key] = torch.full((math.prod(N),), value_dict["cond_aug"], dtype=torch.float, device=device)
         elif key == "cond_frames":
             batch[key] = repeat(value_dict["cond_frames"], "1 ... -> b ...", b=N[0])
         elif key == "cond_frames_without_noise":
@@ -192,7 +197,7 @@ def sampling_main(args, model_cls):
                 image = image.permute(0, 2, 1, 3, 4).contiguous()
                 pad_shape = (image.shape[0], T - 1, C, H, W)
                 image = torch.concat(
-                    [image, torch.zeros(pad_shape).to(image.device).to(image.dtype)], dim=1
+                    [image, torch.zeros(pad_shape, dtype=image.dtype, device=image.device)], dim=1
                 )
             else:
                 image_size = args.sampling_image_size
@@ -242,12 +247,13 @@ def sampling_main(args, model_cls):
 
             for index in range(args.batch_size):
                 if args.image2video:
+                    # OPTIMIZATION: Use torch.full with device instead of tensor.to("cuda")
                     samples_z = sample_func(
                         c,
                         uc=uc,
                         batch_size=1,
                         shape=(T, C, H, W),
-                        ofs=torch.tensor([2.0]).to("cuda"),
+                        ofs=torch.full((1,), 2.0, device="cuda"),
                     )
                 else:
                     samples_z = sample_func(

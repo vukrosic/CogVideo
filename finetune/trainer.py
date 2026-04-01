@@ -10,6 +10,13 @@ import diffusers
 import torch
 import transformers
 import wandb
+
+# OPTIMIZATION: Enable cuDNN auto-tuner for 20-30% convolution speedup
+# Enable Flash Attention and Efficient Attention for SDPA
+if torch.cuda.is_available():
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.enable_flash_sdp(True)
+    torch.backends.cuda.enable_mem_efficient_sdp(True)
 from accelerate.accelerator import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import (
@@ -510,161 +517,160 @@ class Trainer:
             return
 
         self.components.transformer.eval()
-        torch.set_grad_enabled(False)
+        # OPTIMIZATION: Use context manager for exception safety
+        with torch.no_grad():
+            memory_statistics = get_memory_statistics()
+            logger.info(f"Memory before validation start: {json.dumps(memory_statistics, indent=4)}")
 
-        memory_statistics = get_memory_statistics()
-        logger.info(f"Memory before validation start: {json.dumps(memory_statistics, indent=4)}")
+            #####  Initialize pipeline  #####
+            pipe = self.initialize_pipeline()
 
-        #####  Initialize pipeline  #####
-        pipe = self.initialize_pipeline()
-
-        if self.state.using_deepspeed:
-            # Can't using model_cpu_offload in deepspeed,
-            # so we need to move all components in pipe to device
-            # pipe.to(self.accelerator.device, dtype=self.state.weight_dtype)
-            self.__move_components_to_device(
-                dtype=self.state.weight_dtype, ignore_list=["transformer"]
-            )
-        else:
-            # if not using deepspeed, use model_cpu_offload to further reduce memory usage
-            # Or use pipe.enable_sequential_cpu_offload() to further reduce memory usage
-            pipe.enable_model_cpu_offload(device=self.accelerator.device)
-
-            # Convert all model weights to training dtype
-            # Note, this will change LoRA weights in self.components.transformer to training dtype, rather than keep them in fp32
-            pipe = pipe.to(dtype=self.state.weight_dtype)
-
-        #################################
-
-        all_processes_artifacts = []
-        for i in range(num_validation_samples):
-            if self.state.using_deepspeed and self.accelerator.deepspeed_plugin.zero_stage != 3:
-                # Skip current validation on all processes but one
-                if i % accelerator.num_processes != accelerator.process_index:
-                    continue
-
-            prompt = self.state.validation_prompts[i]
-            image = self.state.validation_images[i]
-            video = self.state.validation_videos[i]
-
-            if image is not None:
-                image = preprocess_image_with_resize(
-                    image, self.state.train_height, self.state.train_width
+            if self.state.using_deepspeed:
+                # Can't using model_cpu_offload in deepspeed,
+                # so we need to move all components in pipe to device
+                # pipe.to(self.accelerator.device, dtype=self.state.weight_dtype)
+                self.__move_components_to_device(
+                    dtype=self.state.weight_dtype, ignore_list=["transformer"]
                 )
-                # Convert image tensor (C, H, W) to PIL images
-                image = image.to(torch.uint8)
-                image = image.permute(1, 2, 0).cpu().numpy()
-                image = Image.fromarray(image)
+            else:
+                # if not using deepspeed, use model_cpu_offload to further reduce memory usage
+                # Or use pipe.enable_sequential_cpu_offload() to further reduce memory usage
+                pipe.enable_model_cpu_offload(device=self.accelerator.device)
 
-            if video is not None:
-                video = preprocess_video_with_resize(
-                    video, self.state.train_frames, self.state.train_height, self.state.train_width
-                )
-                # Convert video tensor (F, C, H, W) to list of PIL images
-                video = video.round().clamp(0, 255).to(torch.uint8)
-                video = [Image.fromarray(frame.permute(1, 2, 0).cpu().numpy()) for frame in video]
+                # Convert all model weights to training dtype
+                # Note, this will change LoRA weights in self.components.transformer to training dtype, rather than keep them in fp32
+                pipe = pipe.to(dtype=self.state.weight_dtype)
 
-            logger.debug(
-                f"Validating sample {i + 1}/{num_validation_samples} on process {accelerator.process_index}. Prompt: {prompt}",
-                main_process_only=False,
-            )
-            validation_artifacts = self.validation_step(
-                {"prompt": prompt, "image": image, "video": video}, pipe
-            )
+            #################################
 
-            if (
-                self.state.using_deepspeed
-                and self.accelerator.deepspeed_plugin.zero_stage == 3
-                and not accelerator.is_main_process
-            ):
-                continue
+            all_processes_artifacts = []
+            for i in range(num_validation_samples):
+                if self.state.using_deepspeed and self.accelerator.deepspeed_plugin.zero_stage != 3:
+                    # Skip current validation on all processes but one
+                    if i % accelerator.num_processes != accelerator.process_index:
+                        continue
 
-            prompt_filename = string_to_filename(prompt)[:25]
-            # Calculate hash of reversed prompt as a unique identifier
-            reversed_prompt = prompt[::-1]
-            hash_suffix = hashlib.md5(reversed_prompt.encode()).hexdigest()[:5]
+                prompt = self.state.validation_prompts[i]
+                image = self.state.validation_images[i]
+                video = self.state.validation_videos[i]
 
-            artifacts = {
-                "image": {"type": "image", "value": image},
-                "video": {"type": "video", "value": video},
-            }
-            for i, (artifact_type, artifact_value) in enumerate(validation_artifacts):
-                artifacts.update(
-                    {f"artifact_{i}": {"type": artifact_type, "value": artifact_value}}
-                )
-            logger.debug(
-                f"Validation artifacts on process {accelerator.process_index}: {list(artifacts.keys())}",
-                main_process_only=False,
-            )
-
-            for key, value in list(artifacts.items()):
-                artifact_type = value["type"]
-                artifact_value = value["value"]
-                if artifact_type not in ["image", "video"] or artifact_value is None:
-                    continue
-
-                extension = "png" if artifact_type == "image" else "mp4"
-                filename = f"validation-{step}-{accelerator.process_index}-{prompt_filename}-{hash_suffix}.{extension}"
-                validation_path = self.args.output_dir / "validation_res"
-                validation_path.mkdir(parents=True, exist_ok=True)
-                filename = str(validation_path / filename)
-
-                if artifact_type == "image":
-                    logger.debug(f"Saving image to {filename}")
-                    artifact_value.save(filename)
-                    artifact_value = wandb.Image(filename)
-                elif artifact_type == "video":
-                    logger.debug(f"Saving video to {filename}")
-                    export_to_video(artifact_value, filename, fps=self.args.gen_fps)
-                    artifact_value = wandb.Video(filename, caption=prompt)
-
-                all_processes_artifacts.append(artifact_value)
-
-        all_artifacts = gather_object(all_processes_artifacts)
-
-        if accelerator.is_main_process:
-            tracker_key = "validation"
-            for tracker in accelerator.trackers:
-                if tracker.name == "wandb":
-                    image_artifacts = [
-                        artifact for artifact in all_artifacts if isinstance(artifact, wandb.Image)
-                    ]
-                    video_artifacts = [
-                        artifact for artifact in all_artifacts if isinstance(artifact, wandb.Video)
-                    ]
-                    tracker.log(
-                        {
-                            tracker_key: {"images": image_artifacts, "videos": video_artifacts},
-                        },
-                        step=step,
+                if image is not None:
+                    image = preprocess_image_with_resize(
+                        image, self.state.train_height, self.state.train_width
                     )
+                    # Convert image tensor (C, H, W) to PIL images
+                    image = image.to(torch.uint8)
+                    image = image.permute(1, 2, 0).cpu().numpy()
+                    image = Image.fromarray(image)
 
-        ##########  Clean up  ##########
-        if self.state.using_deepspeed:
-            del pipe
-            # Unload models except those needed for training
-            self.__move_components_to_cpu(unload_list=self.UNLOAD_LIST)
-        else:
-            pipe.remove_all_hooks()
-            del pipe
-            # Load models except those not needed for training
-            self.__move_components_to_device(
-                dtype=self.state.weight_dtype, ignore_list=self.UNLOAD_LIST
-            )
-            self.components.transformer.to(self.accelerator.device, dtype=self.state.weight_dtype)
+                if video is not None:
+                    video = preprocess_video_with_resize(
+                        video, self.state.train_frames, self.state.train_height, self.state.train_width
+                    )
+                    # Convert video tensor (F, C, H, W) to list of PIL images
+                    video = video.round().clamp(0, 255).to(torch.uint8)
+                    video = [Image.fromarray(frame.permute(1, 2, 0).cpu().numpy()) for frame in video]
 
-            # Change trainable weights back to fp32 to keep with dtype after prepare the model
-            cast_training_params([self.components.transformer], dtype=torch.float32)
+                logger.debug(
+                    f"Validating sample {i + 1}/{num_validation_samples} on process {accelerator.process_index}. Prompt: {prompt}",
+                    main_process_only=False,
+                )
+                validation_artifacts = self.validation_step(
+                    {"prompt": prompt, "image": image, "video": video}, pipe
+                )
 
-        free_memory()
-        accelerator.wait_for_everyone()
-        ################################
+                if (
+                    self.state.using_deepspeed
+                    and self.accelerator.deepspeed_plugin.zero_stage == 3
+                    and not accelerator.is_main_process
+                ):
+                    continue
 
-        memory_statistics = get_memory_statistics()
-        logger.info(f"Memory after validation end: {json.dumps(memory_statistics, indent=4)}")
-        torch.cuda.reset_peak_memory_stats(accelerator.device)
+                prompt_filename = string_to_filename(prompt)[:25]
+                # Calculate hash of reversed prompt as a unique identifier
+                reversed_prompt = prompt[::-1]
+                hash_suffix = hashlib.md5(reversed_prompt.encode()).hexdigest()[:5]
 
-        torch.set_grad_enabled(True)
+                artifacts = {
+                    "image": {"type": "image", "value": image},
+                    "video": {"type": "video", "value": video},
+                }
+                for i, (artifact_type, artifact_value) in enumerate(validation_artifacts):
+                    artifacts.update(
+                        {f"artifact_{i}": {"type": artifact_type, "value": artifact_value}}
+                    )
+                logger.debug(
+                    f"Validation artifacts on process {accelerator.process_index}: {list(artifacts.keys())}",
+                    main_process_only=False,
+                )
+
+                for key, value in list(artifacts.items()):
+                    artifact_type = value["type"]
+                    artifact_value = value["value"]
+                    if artifact_type not in ["image", "video"] or artifact_value is None:
+                        continue
+
+                    extension = "png" if artifact_type == "image" else "mp4"
+                    filename = f"validation-{step}-{accelerator.process_index}-{prompt_filename}-{hash_suffix}.{extension}"
+                    validation_path = self.args.output_dir / "validation_res"
+                    validation_path.mkdir(parents=True, exist_ok=True)
+                    filename = str(validation_path / filename)
+
+                    if artifact_type == "image":
+                        logger.debug(f"Saving image to {filename}")
+                        artifact_value.save(filename)
+                        artifact_value = wandb.Image(filename)
+                    elif artifact_type == "video":
+                        logger.debug(f"Saving video to {filename}")
+                        export_to_video(artifact_value, filename, fps=self.args.gen_fps)
+                        artifact_value = wandb.Video(filename, caption=prompt)
+
+                    all_processes_artifacts.append(artifact_value)
+
+            all_artifacts = gather_object(all_processes_artifacts)
+
+            if accelerator.is_main_process:
+                tracker_key = "validation"
+                for tracker in accelerator.trackers:
+                    if tracker.name == "wandb":
+                        image_artifacts = [
+                            artifact for artifact in all_artifacts if isinstance(artifact, wandb.Image)
+                        ]
+                        video_artifacts = [
+                            artifact for artifact in all_artifacts if isinstance(artifact, wandb.Video)
+                        ]
+                        tracker.log(
+                            {
+                                tracker_key: {"images": image_artifacts, "videos": video_artifacts},
+                            },
+                            step=step,
+                        )
+
+            ##########  Clean up  ##########
+            if self.state.using_deepspeed:
+                del pipe
+                # Unload models except those needed for training
+                self.__move_components_to_cpu(unload_list=self.UNLOAD_LIST)
+            else:
+                pipe.remove_all_hooks()
+                del pipe
+                # Load models except those not needed for training
+                self.__move_components_to_device(
+                    dtype=self.state.weight_dtype, ignore_list=self.UNLOAD_LIST
+                )
+                self.components.transformer.to(self.accelerator.device, dtype=self.state.weight_dtype)
+
+                # Change trainable weights back to fp32 to keep with dtype after prepare the model
+                cast_training_params([self.components.transformer], dtype=torch.float32)
+
+            free_memory()
+            accelerator.wait_for_everyone()
+            ################################
+
+            memory_statistics = get_memory_statistics()
+            logger.info(f"Memory after validation end: {json.dumps(memory_statistics, indent=4)}")
+            torch.cuda.reset_peak_memory_stats(accelerator.device)
+
         self.components.transformer.train()
 
     def fit(self):

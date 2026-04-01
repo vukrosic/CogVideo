@@ -45,12 +45,12 @@ class StandardDiffusionLoss(nn.Module):
         sigmas = self.sigma_sampler(input.shape[0]).to(input.device)
         noise = torch.randn_like(input)
         if self.offset_noise_level > 0.0:
+            # OPTIMIZATION: Use dtype arg to create random tensor in correct dtype directly
             noise = (
                 noise
-                + append_dims(torch.randn(input.shape[0]).to(input.device), input.ndim)
+                + append_dims(torch.randn(input.shape[0], dtype=input.dtype, device=input.device), input.ndim)
                 * self.offset_noise_level
             )
-            noise = noise.to(input.dtype)
         noised_input = input.float() + noise * append_dims(sigmas, input.ndim)
         model_output = denoiser(network, noised_input, sigmas, cond, **additional_model_inputs)
         w = append_dims(denoiser.w(sigmas), input.ndim)
@@ -103,7 +103,8 @@ class VideoDiffusionLoss(StandardDiffusionLoss):
         if self.offset_noise_level > 0.0:
             noise = (
                 noise
-                + append_dims(torch.randn(input.shape[0]).to(input.device), input.ndim)
+                # OPTIMIZATION: Use dtype arg to create random tensor in correct dtype directly
+                + append_dims(torch.randn(input.shape[0], dtype=input.dtype, device=input.device), input.ndim)
                 * self.offset_noise_level
             )
 

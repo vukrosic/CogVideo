@@ -21,6 +21,8 @@ class LPIPS(nn.Module):
         self.lin2 = NetLinLayer(self.chns[2], use_dropout=use_dropout)
         self.lin3 = NetLinLayer(self.chns[3], use_dropout=use_dropout)
         self.lin4 = NetLinLayer(self.chns[4], use_dropout=use_dropout)
+        # OPTIMIZATION: Pre-build lins list in __init__ instead of every forward pass
+        self.lins = [self.lin0, self.lin1, self.lin2, self.lin3, self.lin4]
         self.load_from_pretrained()
         for param in self.parameters():
             param.requires_grad = False
@@ -43,18 +45,15 @@ class LPIPS(nn.Module):
         in0_input, in1_input = (self.scaling_layer(input), self.scaling_layer(target))
         outs0, outs1 = self.net(in0_input), self.net(in1_input)
         feats0, feats1, diffs = {}, {}, {}
-        lins = [self.lin0, self.lin1, self.lin2, self.lin3, self.lin4]
         for kk in range(len(self.chns)):
             feats0[kk], feats1[kk] = normalize_tensor(outs0[kk]), normalize_tensor(outs1[kk])
             diffs[kk] = (feats0[kk] - feats1[kk]) ** 2
 
-        res = [
-            spatial_average(lins[kk].model(diffs[kk]), keepdim=True) for kk in range(len(self.chns))
-        ]
-        val = res[0]
-        for l in range(1, len(self.chns)):
-            val += res[l]
-        return val
+        # OPTIMIZATION: Use torch.stack + sum instead of Python loop accumulation
+        res = torch.stack([
+            spatial_average(self.lins[kk].model(diffs[kk]), keepdim=True) for kk in range(len(self.chns))
+        ], dim=0)
+        return res.sum(dim=0)
 
 
 class ScalingLayer(nn.Module):

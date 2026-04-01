@@ -259,7 +259,7 @@ class SATVideoDiffusionEngine(nn.Module):
         ofs=None,
         **kwargs,
     ):
-        randn = torch.randn(batch_size, *shape).to(torch.float32).to(self.device)
+        randn = torch.randn(batch_size, *shape, dtype=torch.float32, device=self.device)
         if hasattr(self, "seeded_noise"):
             randn = self.seeded_noise(randn)
 

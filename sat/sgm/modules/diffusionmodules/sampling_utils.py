@@ -35,7 +35,7 @@ def dynamic_thresholding2(x0):
     origin_dtype = x0.dtype
     x0 = x0.to(torch.float32)
     s = torch.quantile(torch.abs(x0).reshape((x0.shape[0], -1)), p, dim=1)
-    s = append_dims(torch.maximum(s, torch.ones_like(s).to(s.device)), x0.dim())
+    s = append_dims(torch.maximum(s, torch.ones_like(s)), x0.dim())
     x0 = torch.clamp(x0, -s, s)  # / s
     return x0.to(origin_dtype)
 
@@ -55,7 +55,7 @@ def dynamic_thresholding3(x0):
     origin_dtype = x0.dtype
     x0 = x0.to(torch.float32)
     s = torch.quantile(torch.abs(x0).reshape((x0.shape[0], -1)), p, dim=1)
-    s = append_dims(torch.maximum(s, torch.ones_like(s).to(s.device)), x0.dim())
+    s = append_dims(torch.maximum(s, torch.ones_like(s)), x0.dim())
     x0 = torch.clamp(x0, -s, s)  # / s
     return x0.to(origin_dtype)
 

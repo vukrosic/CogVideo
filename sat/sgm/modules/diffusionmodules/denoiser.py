@@ -58,13 +58,21 @@ class DiscreteDenoiser(Denoiser):
         self.sigmas = sigmas
         # self.register_buffer("sigmas", sigmas)
         self.quantize_c_noise = quantize_c_noise
+        # OPTIMIZATION: Cache sigmas on different devices to avoid repeated transfers
+        self._sigmas_cache = {}
+
+    def _get_sigmas(self, device):
+        if device not in self._sigmas_cache:
+            self._sigmas_cache[device] = self.sigmas.to(device)
+        return self._sigmas_cache[device]
 
     def sigma_to_idx(self, sigma):
-        dists = sigma - self.sigmas.to(sigma.device)[:, None]
+        sigmas = self._get_sigmas(sigma.device)
+        dists = sigma - sigmas[:, None]
         return dists.abs().argmin(dim=0).view(sigma.shape)
 
     def idx_to_sigma(self, idx):
-        return self.sigmas.to(idx.device)[idx]
+        return self._get_sigmas(idx.device)[idx]
 
     def possibly_quantize_sigma(self, sigma):
         return self.idx_to_sigma(self.sigma_to_idx(sigma))

@@ -22,7 +22,8 @@ class LitEma(nn.Module):
                 # remove as '.'-character is not allowed in buffers
                 s_name = name.replace(".", "")
                 self.m_name2s_name.update({name: s_name})
-                self.register_buffer(s_name, p.clone().detach().data)
+                # OPTIMIZATION: Removed redundant .data - clone().detach() is sufficient
+                self.register_buffer(s_name, p.clone().detach())
 
         self.collected_params = []
 

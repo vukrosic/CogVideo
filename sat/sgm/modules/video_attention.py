@@ -260,9 +260,8 @@ class SpatialVideoTransformer(SpatialTransformer):
         if self.use_linear:
             x = self.proj_in(x)
 
-        num_frames = torch.arange(timesteps, device=x.device)
-        num_frames = repeat(num_frames, "t -> b t", b=x.shape[0] // timesteps)
-        num_frames = rearrange(num_frames, "b t -> (b t)")
+        # OPTIMIZATION: Use expand instead of repeat (expand doesn't copy memory)
+        num_frames = torch.arange(timesteps, device=x.device)[None, :].expand(x.shape[0] // timesteps, timesteps).reshape(-1)
         t_emb = timestep_embedding(
             num_frames,
             self.in_channels,

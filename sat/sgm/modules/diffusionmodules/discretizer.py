@@ -34,12 +34,13 @@ class EDMDiscretization(Discretization):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.rho = rho
+        # OPTIMIZATION: Precompute constants in __init__ instead of every get_sigmas call
+        self.min_inv_rho = sigma_min ** (1 / rho)
+        self.max_inv_rho = sigma_max ** (1 / rho)
 
     def get_sigmas(self, n, device="cpu"):
         ramp = torch.linspace(0, 1, n, device=device)
-        min_inv_rho = self.sigma_min ** (1 / self.rho)
-        max_inv_rho = self.sigma_max ** (1 / self.rho)
-        sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** self.rho
+        sigmas = (self.max_inv_rho + ramp * (self.min_inv_rho - self.max_inv_rho)) ** self.rho
         return sigmas
 
 
@@ -115,20 +116,19 @@ class ZeroSNRDDPMDiscretization(Discretization):
         to_torch = partial(torch.tensor, dtype=torch.float32, device=device)
         alphas_cumprod = to_torch(alphas_cumprod)
         alphas_cumprod_sqrt = alphas_cumprod.sqrt()
-        alphas_cumprod_sqrt_0 = alphas_cumprod_sqrt[0].clone()
-        alphas_cumprod_sqrt_T = alphas_cumprod_sqrt[-1].clone()
+        # OPTIMIZATION: Use scalar .item() instead of tensor.clone() for scalar extracts
+        sqrt_0 = alphas_cumprod_sqrt[0].item()
+        sqrt_T = alphas_cumprod_sqrt[-1].item()
 
-        alphas_cumprod_sqrt -= alphas_cumprod_sqrt_T
-        alphas_cumprod_sqrt *= alphas_cumprod_sqrt_0 / (
-            alphas_cumprod_sqrt_0 - alphas_cumprod_sqrt_T
-        )
+        alphas_cumprod_sqrt -= sqrt_T
+        alphas_cumprod_sqrt *= sqrt_0 / (sqrt_0 - sqrt_T)
 
         if self.post_shift:
-            alphas_cumprod_sqrt = (
-                alphas_cumprod_sqrt**2
-                / (self.shift_scale + (1 - self.shift_scale) * alphas_cumprod_sqrt**2)
-            ) ** 0.5
+            # OPTIMIZATION: Compute sq once instead of twice
+            sq = alphas_cumprod_sqrt ** 2
+            alphas_cumprod_sqrt = (sq / (self.shift_scale + (1 - self.shift_scale) * sq)) ** 0.5
 
+        # OPTIMIZATION: Move timesteps computation here to avoid computing when return_idx=False
         if return_idx:
             return torch.flip(alphas_cumprod_sqrt, (0,)), timesteps
         else:

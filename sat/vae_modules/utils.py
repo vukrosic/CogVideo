@@ -71,7 +71,8 @@ def get_context_parallel_group_rank():
 
 class SafeConv3d(torch.nn.Conv3d):
     def forward(self, input):
-        memory_count = torch.prod(torch.tensor(input.shape)).item() * 2 / 1024**3
+        # OPTIMIZATION: Use input.numel() instead of creating tensor from shape
+        memory_count = input.numel() * 2 / 1024**3
         if memory_count > 2:
             kernel_size = self.kernel_size[0]
             part_num = int(memory_count / 2) + 1
@@ -105,8 +106,8 @@ def get_string_from_tuple(s):
         if s[0] == "(" and s[-1] == ")":
             # Convert the string to a tuple
             t = eval(s)
-            # Check if the type of t is tuple
-            if type(t) == tuple:
+            # OPTIMIZATION: Use isinstance() instead of type() == for proper subclass handling
+            if isinstance(t, tuple):
                 return t[0]
             else:
                 pass
@@ -171,7 +172,8 @@ def log_txt_as_img(wh, xc, size=10):
         txt = np.array(txt).transpose(2, 0, 1) / 127.5 - 1.0
         txts.append(txt)
     txts = np.stack(txts)
-    txts = torch.tensor(txts)
+    # OPTIMIZATION: Use from_numpy to avoid extra copy (from_numpy shares memory, tensor copies)
+    txts = torch.from_numpy(txts)
     return txts
 
 

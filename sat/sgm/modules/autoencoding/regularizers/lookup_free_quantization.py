@@ -246,7 +246,8 @@ class LFQ(Module):
             if self.frac_per_sample_entropy < 1.0:
                 num_tokens = prob.shape[0]
                 num_sampled_tokens = int(num_tokens * self.frac_per_sample_entropy)
-                rand_mask = torch.randn(num_tokens).argsort(dim=-1) < num_sampled_tokens
+                # OPTIMIZATION: Use randperm for efficient random sampling without sorting
+                rand_mask = torch.randperm(num_tokens, device=prob.device) < num_sampled_tokens
                 per_sample_probs = prob[rand_mask]
             else:
                 per_sample_probs = prob

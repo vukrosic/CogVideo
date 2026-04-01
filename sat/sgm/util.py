@@ -1,5 +1,6 @@
 import functools
 import importlib
+import math
 import os
 from functools import partial
 from inspect import isfunction
@@ -78,7 +79,7 @@ def get_context_parallel_group_rank():
 
 class SafeConv3d(torch.nn.Conv3d):
     def forward(self, input):
-        memory_count = torch.prod(torch.tensor(input.shape)).item() * 2 / 1024**3
+        memory_count = math.prod(input.shape) * 2 / 1024**3
         if memory_count > 2:
             # print(f"WARNING: Conv3d with {memory_count:.2f}GB")
             kernel_size = self.kernel_size[0]
@@ -377,9 +378,12 @@ class SeededNoise:
     def __call__(self, x):
         self.cnt += 1
         randn_combined = torch.zeros_like(x)
-        for seed, weight in zip(self.seeds, self.weights):
-            randn = np.random.RandomState(seed + self.cnt).randn(*x.shape)
-            randn = torch.from_numpy(randn, dtype=x.dtype, device=x.device)
-            randn_combined += randn * weight
+        # OPTIMIZATION: Batch generate numpy arrays, then single convert to torch
+        rng_states = [np.random.RandomState(seed + self.cnt) for seed in self.seeds]
+        randn_np_list = [rng.randn(*x.shape) for rng in rng_states]
+
+        for randn_np, weight in zip(randn_np_list, self.weights):
+            # Convert entire array at once, not per-iteration
+            randn_combined += torch.from_numpy(randn_np).to(device=x.device, dtype=x.dtype) * weight
         randn_combined /= self.weight_square_sum_sqrt
         return randn_combined

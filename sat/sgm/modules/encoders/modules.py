@@ -160,11 +160,11 @@ class GeneralConditioner(nn.Module):
             out_key = self.OUTPUT_DIM2KEYS[emb.dim()]
             if embedder.ucg_rate > 0.0 and embedder.legacy_ucg_val is None:
                 if cond_or_not is None:
+                    # OPTIMIZATION: Use torch.full instead of torch.ones + scalar multiplication
                     emb = (
                         expand_dims_like(
                             torch.bernoulli(
-                                (1.0 - embedder.ucg_rate)
-                                * torch.ones(emb.shape[0], device=emb.device)
+                                torch.full((emb.shape[0],), 1.0 - embedder.ucg_rate, device=emb.device)
                             ),
                             emb,
                         )
