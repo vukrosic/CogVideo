@@ -91,11 +91,12 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         self, inputs: torch.Tensor, reconstructions: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
         # calc logits of real/fake
-        logits_real = self.discriminator(inputs.contiguous().detach())
+        # OPTIMIZATION: Call detach() before contiguous() to avoid gradient tracking
+        logits_real = self.discriminator(inputs.detach().contiguous())
         if len(logits_real.shape) < 4:
             # Non patch-discriminator
             return dict()
-        logits_fake = self.discriminator(reconstructions.contiguous().detach())
+        logits_fake = self.discriminator(reconstructions.detach().contiguous())
         # -> (b, 1, h, w)
 
         # parameters for colormapping

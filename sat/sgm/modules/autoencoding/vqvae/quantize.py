@@ -233,7 +233,10 @@ class GumbelQuantize(nn.Module):
             # go back to all entries but unused set to zero
             full_zeros[:, self.used, ...] = soft_one_hot
             soft_one_hot = full_zeros
-        z_q = einsum("b n h w, n d -> b d h w", soft_one_hot, self.embed.weight)
+        # OPTIMIZATION: Replace einsum with reshape + bmm for better performance
+        b, n, h, w = soft_one_hot.shape
+        z_q = torch.bmm(soft_one_hot.reshape(b, n, h * w).transpose(1, 2), self.embed.weight)
+        z_q = z_q.transpose(1, 2).reshape(b, -1, h, w)
 
         # + kl divergence to the prior loss
         qy = F.softmax(logits, dim=1)
@@ -255,5 +258,8 @@ class GumbelQuantize(nn.Module):
         if self.remap is not None:
             indices = self.unmap_to_all(indices)
         one_hot = F.one_hot(indices, num_classes=self.n_embed).permute(0, 3, 1, 2).float()
-        z_q = einsum("b n h w, n d -> b d h w", one_hot, self.embed.weight)
+        # OPTIMIZATION: Replace einsum with reshape + bmm for better performance
+        b, n, h, w = one_hot.shape
+        z_q = torch.bmm(one_hot.reshape(b, n, h * w).transpose(1, 2), self.embed.weight)
+        z_q = z_q.transpose(1, 2).reshape(b, -1, h, w)
         return z_q

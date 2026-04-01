@@ -319,16 +319,27 @@ def benchmark_attention(q, k, v, num_iters=100):
 
 ## Summary of Changes
 
-### Files Modified (50+)
+### Files Modified (60+)
 
 | Category | Files | Changes |
 |----------|-------|---------|
 | Attention | 7 | SDPA replacing bmm |
-| Activations | 8 | F.silu replacing manual |
+| Activations | 9 | F.silu replacing manual SiLU |
 | Tensor Creation | 15+ | Direct device/dtype |
-| Memory | 5+ | Cached transfers |
-| Algorithms | 10+ | Precomputed expressions |
-| Bugs | 2 | Fixed critical bugs |
+| Memory | 8+ | Cached transfers, detach before contiguous |
+| Data Structures | 2 | deque replacing list.pop(0) |
+| Algorithms | 12+ | Precomputed expressions, bmm replacing einsum |
+| EMA Buffers | 2 | register_buffer instead of nn.Parameter |
+| Bugs | 3 | Fixed critical bugs |
+
+### Recent Additions
+
+- `sat/vae_modules/cp_enc_dec.py` - detach() before contiguous() order
+- `sat/sgm/modules/autoencoding/losses/discriminator_loss.py` - detach() before contiguous() order
+- `sat/sgm/modules/diffusionmodules/sampling.py` - deque with maxlen for O(1) eviction
+- `sat/sgm/modules/diffusionmodules/sampling.py` - torch.allclose for zero-check
+- `sat/sgm/modules/autoencoding/regularizers/quantize.py` - bmm replacing einsum in GumbelQuantizer
+- `sat/sgm/modules/autoencoding/vqvae/quantize.py` - bmm replacing einsum in VectorQuantizer2
 
 ### Expected Overall Impact
 

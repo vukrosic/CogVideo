@@ -231,9 +231,7 @@ class LFQ(Module):
 
         if self.training:
             # the same as euclidean distance up to a constant
-            # OPTIMIZATION: Replace einsum with bmm for better performance
-            orig_flat = original_input.reshape(-1, original_input.shape[-2], original_input.shape[-1])
-            distance = -2 * torch.bmm(orig_flat, self.codebook.unsqueeze(0).expand(orig_flat.shape[0], -1, -1))
+            distance = -2 * einsum("... i d, j d -> ... i j", original_input, self.codebook)
 
             prob = (-distance * inv_temperature).softmax(dim=-1)
 

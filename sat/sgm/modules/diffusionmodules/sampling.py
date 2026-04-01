@@ -2,6 +2,7 @@
 Partially ported from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/sampling.py
 """
 
+from collections import deque
 from typing import Dict, Union
 
 import torch
@@ -213,7 +214,8 @@ class LinearMultistepSampler(BaseDiffusionSampler):
     def __call__(self, denoiser, x, cond, uc=None, num_steps=None, **kwargs):
         x, s_in, sigmas, num_sigmas, cond, uc = self.prepare_sampling_loop(x, cond, uc, num_steps)
 
-        ds = []
+        # OPTIMIZATION: Use deque with maxlen instead of list pop(0) for O(1) eviction
+        ds = deque(maxlen=self.order)
         sigmas_cpu = sigmas.detach().cpu().numpy()
         for i in self.get_sigma_gen(num_sigmas):
             sigma = s_in * sigmas[i]
@@ -221,8 +223,7 @@ class LinearMultistepSampler(BaseDiffusionSampler):
             denoised = self.guider(denoised, sigma)
             d = to_d(x, sigma, denoised)
             ds.append(d)
-            if len(ds) > self.order:
-                ds.pop(0)
+            # No need for len check or pop(0) - deque with maxlen auto-evicts
             cur_order = min(i + 1, self.order)
             coeffs = [linear_multistep_coeff(cur_order, sigmas_cpu, i, j) for j in range(cur_order)]
             x = x + sum(coeff * d for coeff, d in zip(coeffs, reversed(ds)))
@@ -237,7 +238,8 @@ class EulerEDMSampler(EDMSampler):
 
 class HeunEDMSampler(EDMSampler):
     def possible_correction_step(self, euler_step, x, d, dt, next_sigma, denoiser, cond, uc):
-        if torch.sum(next_sigma) < 1e-14:
+        # OPTIMIZATION: Use torch.allclose instead of summing all elements
+        if torch.allclose(next_sigma, torch.zeros_like(next_sigma), atol=1e-14):
             # Save a network evaluation if all noise levels are 0
             return euler_step
         else:

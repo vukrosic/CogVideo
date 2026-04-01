@@ -375,10 +375,11 @@ class ContextParallelCausalConv3d(nn.Module):
             cp_rank, cp_world_size = get_context_parallel_rank(), get_context_parallel_world_size()
             global_rank = torch.distributed.get_rank()
             if cp_world_size == 1:
+                # OPTIMIZATION: Call detach() before contiguous() to avoid gradient tracking through contiguity check
                 self.cache_padding = (
                     input_parallel[:, :, -self.time_kernel_size + 1 :]
-                    .contiguous()
                     .detach()
+                    .contiguous()
                     .clone()
                     .cpu()
                 )
@@ -398,7 +399,8 @@ class ContextParallelCausalConv3d(nn.Module):
                         global_rank - 1 + cp_world_size,
                         group=get_context_parallel_group(),
                     )
-                    self.cache_padding = recv_buffer.contiguous().detach().clone().cpu()
+                    # OPTIMIZATION: Call detach() before contiguous() to avoid gradient tracking
+                    self.cache_padding = recv_buffer.detach().contiguous().clone().cpu()
 
         padding_2d = (self.width_pad, self.width_pad, self.height_pad, self.height_pad)
         input_parallel = F.pad(input_parallel, padding_2d, mode="constant", value=0)
