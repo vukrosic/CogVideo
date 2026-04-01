@@ -134,7 +134,10 @@ class GumbelQuantizer(AbstractQuantizer):
             # go back to all entries but unused set to zero
             full_zeros[:, self.used, ...] = soft_one_hot
             soft_one_hot = full_zeros
-        z_q = einsum("b n h w, n d -> b d h w", soft_one_hot, self.embed.weight)
+        # OPTIMIZATION: Replace einsum with reshape + bmm for better performance
+        b, n, h, w = soft_one_hot.shape
+        z_q = torch.bmm(soft_one_hot.reshape(b, n, h * w).transpose(1, 2), self.embed.weight)
+        z_q = z_q.transpose(1, 2).reshape(b, -1, h, w)
 
         # + kl divergence to the prior loss
         qy = F.softmax(logits, dim=1)
@@ -159,7 +162,10 @@ class GumbelQuantizer(AbstractQuantizer):
         if self.remap is not None:
             indices = self.unmap_to_all(indices)
         one_hot = F.one_hot(indices, num_classes=self.n_embed).permute(0, 3, 1, 2).float()
-        z_q = einsum("b n h w, n d -> b d h w", one_hot, self.embed.weight)
+        # OPTIMIZATION: Replace einsum with reshape + bmm for better performance
+        b, n, h, w = one_hot.shape
+        z_q = torch.bmm(one_hot.reshape(b, n, h * w).transpose(1, 2), self.embed.weight)
+        z_q = z_q.transpose(1, 2).reshape(b, -1, h, w)
         return z_q
 
 
@@ -310,19 +316,22 @@ class EmbeddingEMA(nn.Module):
         self.decay = decay
         self.eps = eps
         weight = torch.randn(num_tokens, codebook_dim)
-        self.weight = nn.Parameter(weight, requires_grad=False)
-        self.cluster_size = nn.Parameter(torch.zeros(num_tokens), requires_grad=False)
-        self.embed_avg = nn.Parameter(weight.clone(), requires_grad=False)
+        # OPTIMIZATION: Use buffers instead of Parameters with requires_grad=False (more efficient)
+        self.register_buffer("weight", weight)
+        self.register_buffer("cluster_size", torch.zeros(num_tokens))
+        self.register_buffer("embed_avg", weight.clone())
         self.update = True
 
     def forward(self, embed_id):
         return F.embedding(embed_id, self.weight)
 
     def cluster_size_ema_update(self, new_cluster_size):
-        self.cluster_size.data.mul_(self.decay).add_(new_cluster_size, alpha=1 - self.decay)
+        # OPTIMIZATION: Use proper in-place operations (no .data access)
+        self.cluster_size.mul_(self.decay).add_(new_cluster_size, alpha=1 - self.decay)
 
     def embed_avg_ema_update(self, new_embed_avg):
-        self.embed_avg.data.mul_(self.decay).add_(new_embed_avg, alpha=1 - self.decay)
+        # OPTIMIZATION: Use proper in-place operations (no .data access)
+        self.embed_avg.mul_(self.decay).add_(new_embed_avg, alpha=1 - self.decay)
 
     def weight_update(self, num_tokens):
         n = self.cluster_size.sum()

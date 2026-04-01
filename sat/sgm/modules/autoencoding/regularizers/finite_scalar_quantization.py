@@ -63,6 +63,10 @@ class FSQ(Module):
         _basis = torch.cumprod(torch.tensor([1] + levels[:-1]), dim=0, dtype=int32)
         self.register_buffer("_basis", _basis, persistent=False)
 
+        # OPTIMIZATION: Precompute offset factor since _levels doesn't change after init
+        _offset = torch.where(_levels % 2 == 0, 0.5, 0.0)
+        self.register_buffer("_offset", _offset, persistent=False)
+
         self.scale = scale
 
         codebook_dim = len(levels)
@@ -97,9 +101,9 @@ class FSQ(Module):
     def bound(self, z: Tensor, eps: float = 1e-3) -> Tensor:
         """Bound `z`, an array of shape (..., d)."""
         half_l = (self._levels - 1) * (1 + eps) / 2
-        offset = torch.where(self._levels % 2 == 0, 0.5, 0.0)
-        shift = (offset / half_l).atanh()
-        return (z + shift).tanh() * half_l - offset
+        # OPTIMIZATION: Use precomputed offset buffer
+        shift = (self._offset / half_l).atanh()
+        return (z + shift).tanh() * half_l - self._offset
 
     def quantize(self, z: Tensor) -> Tensor:
         """Quantizes z, returns quantized zhat, same shape as z."""

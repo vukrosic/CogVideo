@@ -51,10 +51,10 @@ def grad_layer_wrt_loss(loss: Tensor, layer: nn.Parameter):
 
 
 def pick_video_frame(video, frame_indices):
-    batch, device = video.shape[0], video.device
+    # OPTIMIZATION: Use unsqueeze instead of rearrange for batch_indices
+    batch = video.shape[0]
     video = rearrange(video, "b c f ... -> b f c ...")
-    batch_indices = torch.arange(batch, device=device)
-    batch_indices = rearrange(batch_indices, "b -> b 1")
+    batch_indices = torch.arange(batch, device=video.device).unsqueeze(1)
     images = video[batch_indices, frame_indices]
     images = rearrange(images, "b 1 c ... -> b c ...")
     return images

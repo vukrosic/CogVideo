@@ -211,8 +211,9 @@ class LFQ(Module):
 
         original_input = x
 
-        codebook_value = torch.ones_like(x) * self.codebook_scale
-        quantized = torch.where(x > 0, codebook_value, -codebook_value)
+        # OPTIMIZATION: Avoid creating ones_like tensor - use sign + offset instead
+        # This avoids memory allocation of intermediate tensor
+        quantized = torch.where(x > 0, self.codebook_scale, -self.codebook_scale)
 
         # use straight-through gradients (optionally with custom activation fn) if training
 
@@ -230,7 +231,9 @@ class LFQ(Module):
 
         if self.training:
             # the same as euclidean distance up to a constant
-            distance = -2 * einsum("... i d, j d -> ... i j", original_input, self.codebook)
+            # OPTIMIZATION: Replace einsum with bmm for better performance
+            orig_flat = original_input.reshape(-1, original_input.shape[-2], original_input.shape[-1])
+            distance = -2 * torch.bmm(orig_flat, self.codebook.unsqueeze(0).expand(orig_flat.shape[0], -1, -1))
 
             prob = (-distance * inv_temperature).softmax(dim=-1)
 
