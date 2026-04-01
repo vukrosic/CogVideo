@@ -261,7 +261,11 @@ class SiLU(nn.Module):
 
 class GroupNorm32(nn.GroupNorm):
     def forward(self, x):
-        return super().forward(x).type(x.dtype)
+        # OPTIMIZATION: Only convert dtype if needed to avoid redundant kernel launch
+        out = super().forward(x)
+        if out.dtype != x.dtype:
+            return out.type(x.dtype)
+        return out
 
 
 def conv_nd(dims, *args, **kwargs):

@@ -28,7 +28,7 @@ class EDMScaling:
 
         c_skip = self.sigma_data_sq * inv_sigma_sq_plus_data_sq
         c_out = sigma * self.sigma_data / sqrt_sigma_sq_plus_data_sq
-        c_in = inv_sigma_sq_plus_data_sq * sigma_sq_plus_data_sq ** 0.5  # 1 / sqrt(...) = sqrt(...) / (...)
+        c_in = inv_sigma_sq_plus_data_sq * sqrt_sigma_sq_plus_data_sq  # 1 / sqrt(...) = sqrt(...) / (...)
         c_noise = 0.25 * sigma.log()
         return c_skip, c_out, c_in, c_noise
 

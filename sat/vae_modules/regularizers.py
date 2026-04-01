@@ -13,9 +13,10 @@ class DiagonalGaussianDistribution(object):
         self.mean, self.logvar = torch.chunk(parameters, 2, dim=1)
         self.logvar = torch.clamp(self.logvar, -30.0, 20.0)
         self.deterministic = deterministic
-        # OPTIMIZATION: Compute var first, then std = sqrt(var) avoids extra exp()
+        # OPTIMIZATION: Compute std directly as exp(0.5*logvar) instead of exp(logvar) then sqrt()
+        # This avoids creating the intermediate var tensor
         self.var = torch.exp(self.logvar)
-        self.std = self.var.sqrt()
+        self.std = torch.exp(0.5 * self.logvar)  # sqrt(exp(x)) = exp(x/2)
         if self.deterministic:
             # OPTIMIZATION: Removed redundant .to(device=...) - zeros_like inherits device
             self.var = self.std = torch.zeros_like(self.mean)
