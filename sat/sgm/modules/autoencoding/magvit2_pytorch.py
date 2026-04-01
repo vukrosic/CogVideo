@@ -104,10 +104,10 @@ def pad_at_dim(t, pad, dim=-1, value=0.0):
 
 
 def pick_video_frame(video, frame_indices):
+    # OPTIMIZATION: Use unsqueeze instead of rearrange for batch_indices
     batch, device = video.shape[0], video.device
     video = rearrange(video, "b c f ... -> b f c ...")
-    batch_indices = torch.arange(batch, device=device)
-    batch_indices = rearrange(batch_indices, "b -> b 1")
+    batch_indices = torch.arange(batch, device=device).unsqueeze(1)
     images = video[batch_indices, frame_indices]
     images = rearrange(images, "b 1 c ... -> b c ...")
     return images
@@ -122,13 +122,14 @@ def gradient_penalty(images, output):
     gradients = torch_grad(
         outputs=output,
         inputs=images,
-        grad_outputs=torch.ones(output.size(), device=images.device),
+        grad_outputs=torch.ones_like(output),
         create_graph=True,
         retain_graph=True,
         only_inputs=True,
     )[0]
 
-    gradients = rearrange(gradients, "b ... -> b (...)")
+    # OPTIMIZATION: Use flatten instead of rearrange for better performance
+    gradients = gradients.flatten(1)
     return ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
 
@@ -248,7 +249,7 @@ class SqueezeExcite(Module):
 
         # OPTIMIZATION: Replace einsum with bmm (more efficient)
         out = torch.bmm(context.transpose(-2, -1), spatial_flattened_input)  # (b, n, c) @ (b, c, n) -> (b, c, c)
-        out = rearrange(out, "... -> ... 1")
+        out = out[..., None]  # OPTIMIZATION: Use indexing instead of rearrange
         gates = self.net(out)
 
         if is_video:
@@ -495,7 +496,7 @@ class FeedForward(Module):
 class Blur(Module):
     def __init__(self):
         super().__init__()
-        f = torch.Tensor([1, 2, 1])
+        f = torch.tensor([1, 2, 1], dtype=torch.float32)  # OPTIMIZATION: Use torch.tensor with explicit dtype
         self.register_buffer("f", f)
 
     def forward(self, x, space_only=False, time_only=False):
@@ -508,7 +509,7 @@ class Blur(Module):
             f = torch.outer(f, f)  # (3,) outer (3,) -> (3, 3)
             f = f[None, None, ...]  # equivalent to rearrange(f, "... -> 1 1 ...")
         elif time_only:
-            f = rearrange(f, "f -> 1 f 1 1")
+            f = f[None, :, None, None]  # OPTIMIZATION: Use indexing instead of rearrange
         else:
             # OPTIMIZATION: Use broadcasting instead of einsum for 3D outer product
             f = f[:, None, None] * f[None, :, None] * f[None, None, :]  # -> (3, 3, 3)
@@ -707,7 +708,7 @@ class Conv3DMod(Module):
 
         # do the modulation, demodulation, as done in stylegan2
 
-        cond = rearrange(cond, "b i -> b 1 i 1 1 1")
+        cond = cond[:, None, :, None, None, None]  # OPTIMIZATION: Use indexing instead of rearrange
 
         weights = weights * (cond + 1)
 
@@ -719,14 +720,14 @@ class Conv3DMod(Module):
             )
             weights = weights * inv_norm
 
-        fmap = rearrange(fmap, "b c t h w -> 1 (b c) t h w")
+        fmap = fmap.view(1, -1, *fmap.shape[2:])  # OPTIMIZATION: Use view instead of rearrange
 
         weights = rearrange(weights, "b o ... -> (b o) ...")
 
         fmap = F.pad(fmap, self.padding, mode=self.pad_mode)
         fmap = F.conv3d(fmap, weights, groups=b)
 
-        return rearrange(fmap, "1 (b o) ... -> b o ...", b=b)
+        return fmap.view(b, -1, *fmap.shape[2:])  # OPTIMIZATION: Use view instead of rearrange
 
 
 # strided conv downsamples

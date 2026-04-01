@@ -282,7 +282,7 @@ class DPMPP2SAncestralSampler(AncestralSampler):
         denoised = self.denoise(x, denoiser, sigma, cond, uc)
         x_euler = self.ancestral_euler_step(x, denoised, sigma, sigma_down)
 
-        if torch.sum(sigma_down) < 1e-14:
+        if torch.allclose(sigma_down, torch.zeros_like(sigma_down), atol=1e-14):
             # Save a network evaluation if all noise levels are 0
             x = x_euler
         else:
@@ -342,7 +342,7 @@ class DPMPP2MSampler(BaseDiffusionSampler):
         ]
 
         x_standard = mult[0] * x - mult[1] * denoised
-        if old_denoised is None or torch.sum(next_sigma) < 1e-14:
+        if old_denoised is None or torch.allclose(next_sigma, torch.zeros_like(next_sigma), atol=1e-14):
             # Save a network evaluation if all noise levels are 0 or on the first step
             return x_standard, denoised
         else:
@@ -416,7 +416,7 @@ class SDEDPMPP2MSampler(BaseDiffusionSampler):
         mult_noise = append_dims(next_sigma * (1 - (-2 * h).exp()) ** 0.5, x.ndim)
 
         x_standard = mult[0] * x - mult[1] * denoised + mult_noise * torch.randn_like(x)
-        if old_denoised is None or torch.sum(next_sigma) < 1e-14:
+        if old_denoised is None or torch.allclose(next_sigma, torch.zeros_like(next_sigma), atol=1e-14):
             # Save a network evaluation if all noise levels are 0 or on the first step
             return x_standard, denoised
         else:
@@ -763,7 +763,7 @@ class VPSDEDPMPP2MSampler(VideoDDIMSampler):
         )
 
         x_standard = mult[0] * x - mult[1] * denoised + mult_noise * torch.randn_like(x)
-        if old_denoised is None or torch.sum(next_alpha_cumprod_sqrt) < 1e-14:
+        if old_denoised is None or torch.allclose(next_alpha_cumprod_sqrt, torch.zeros_like(next_alpha_cumprod_sqrt), atol=1e-14):
             # Save a network evaluation if all noise levels are 0 or on the first step
             return x_standard, denoised
         else:
@@ -878,7 +878,7 @@ class VPODEDPMPP2MSampler(VideoDDIMSampler):
         ]
 
         x_standard = mult[0] * x - mult[1] * denoised
-        if old_denoised is None or torch.sum(next_alpha_cumprod_sqrt) < 1e-14:
+        if old_denoised is None or torch.allclose(next_alpha_cumprod_sqrt, torch.zeros_like(next_alpha_cumprod_sqrt), atol=1e-14):
             # Save a network evaluation if all noise levels are 0 or on the first step
             return x_standard, denoised
         else:

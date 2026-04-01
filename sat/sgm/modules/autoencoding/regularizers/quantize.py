@@ -236,7 +236,7 @@ class VectorQuantizer(AbstractQuantizer):
         do_reshape = z.ndim == 4
         if do_reshape:
             #     # reshape z -> (batch, height, width, channel) and flatten
-            z = rearrange(z, "b c h w -> b h w c").contiguous()
+            z = z.permute(0, 2, 3, 1).contiguous()  # OPTIMIZATION: Use permute instead of rearrange
 
         else:
             assert z.ndim < 4, "No reshaping strategy for inputs > 4 dimensions defined"
@@ -268,7 +268,7 @@ class VectorQuantizer(AbstractQuantizer):
 
         # reshape back to match original input shape
         if do_reshape:
-            z_q = rearrange(z_q, "b h w c -> b c h w").contiguous()
+            z_q = z_q.permute(0, 3, 1, 2).contiguous()  # OPTIMIZATION: Use permute instead of rearrange
 
         if self.remap is not None:
             min_encoding_indices = min_encoding_indices.reshape(z.shape[0], -1)  # add batch axis
@@ -385,7 +385,7 @@ class EMAVectorQuantizer(AbstractQuantizer):
     def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         # reshape z -> (batch, height, width, channel) and flatten
         # z, 'b c h w -> b h w c'
-        z = rearrange(z, "b c h w -> b h w c")
+        z = z.permute(0, 2, 3, 1)  # OPTIMIZATION: Use permute instead of rearrange
         z_flattened = z.reshape(-1, self.codebook_dim)
 
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
@@ -421,7 +421,7 @@ class EMAVectorQuantizer(AbstractQuantizer):
 
         # reshape back to match original input shape
         # z_q, 'b h w c -> b c h w'
-        z_q = rearrange(z_q, "b h w c -> b c h w")
+        z_q = z_q.permute(0, 3, 1, 2)  # OPTIMIZATION: Use permute instead of rearrange
 
         out_dict = {
             self.loss_key: loss,

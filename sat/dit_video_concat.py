@@ -275,13 +275,14 @@ class Rotary3DPositionEmbeddingMixin(BaseMixin):
         dim_h = hidden_size_head // 8 * 3
         dim_w = hidden_size_head // 8 * 3
 
-        freqs_t = 1.0 / (theta ** (torch.arange(0, dim_t, 2)[: (dim_t // 2)].float() / dim_t))
-        freqs_h = 1.0 / (theta ** (torch.arange(0, dim_h, 2)[: (dim_h // 2)].float() / dim_h))
-        freqs_w = 1.0 / (theta ** (torch.arange(0, dim_w, 2)[: (dim_w // 2)].float() / dim_w))
+        # OPTIMIZATION: Create tensors directly on CUDA to avoid CPU->GPU transfer
+        freqs_t = 1.0 / (theta ** (torch.arange(0, dim_t, 2, device='cuda')[: (dim_t // 2)].float() / dim_t))
+        freqs_h = 1.0 / (theta ** (torch.arange(0, dim_h, 2, device='cuda')[: (dim_h // 2)].float() / dim_h))
+        freqs_w = 1.0 / (theta ** (torch.arange(0, dim_w, 2, device='cuda')[: (dim_w // 2)].float() / dim_w))
 
-        grid_t = torch.arange(compressed_num_frames, dtype=torch.float32)
-        grid_h = torch.arange(height, dtype=torch.float32)
-        grid_w = torch.arange(width, dtype=torch.float32)
+        grid_t = torch.arange(compressed_num_frames, dtype=torch.float32, device='cuda')
+        grid_h = torch.arange(height, dtype=torch.float32, device='cuda')
+        grid_w = torch.arange(width, dtype=torch.float32, device='cuda')
 
         # OPTIMIZATION: Use broadcasting instead of einsum for outer product
         freqs_t = grid_t[:, None] * freqs_t[None, :]  # outer product via broadcasting
@@ -298,8 +299,9 @@ class Rotary3DPositionEmbeddingMixin(BaseMixin):
         )
 
         freqs = freqs.contiguous()
-        self.freqs_sin = freqs.sin().cuda()
-        self.freqs_cos = freqs.cos().cuda()
+        # OPTIMIZATION: freqs is already on CUDA, no need for .cuda() after sin/cos
+        self.freqs_sin = freqs.sin()
+        self.freqs_cos = freqs.cos()
         self.text_length = text_length
         if learnable_pos_embed:
             num_patches = height * width * compressed_num_frames + text_length

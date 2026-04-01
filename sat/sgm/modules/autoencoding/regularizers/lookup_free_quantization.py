@@ -148,7 +148,7 @@ class LFQ(Module):
         is_img_or_video = indices.ndim >= (3 + int(self.keep_num_codebooks_dim))
 
         if not self.keep_num_codebooks_dim:
-            indices = rearrange(indices, "... -> ... 1")
+            indices = indices[..., None]  # OPTIMIZATION: Use indexing instead of rearrange
 
         # indices to codes, which are bits of either -1 or 1
 
@@ -156,7 +156,7 @@ class LFQ(Module):
 
         codes = self.bits_to_codes(bits)
 
-        codes = rearrange(codes, "... c d -> ... (c d)")
+        codes = codes.flatten(-2)  # OPTIMIZATION: Use flatten instead of rearrange
 
         # whether to project codes out to original dimensions
         # if the input feature dimensions were not log2(codebook size)
@@ -301,7 +301,7 @@ class LFQ(Module):
         # whether to remove single codebook dim
 
         if not self.keep_num_codebooks_dim:
-            indices = rearrange(indices, "... 1 -> ...")
+            indices = indices[..., 0]  # OPTIMIZATION: Use indexing instead of rearrange
 
         # complete aux loss
 

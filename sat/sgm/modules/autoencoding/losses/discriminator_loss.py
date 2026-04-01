@@ -250,10 +250,10 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
                         nll_loss, g_loss, last_layer=last_layer
                     )
                 else:
-                    d_weight = torch.tensor(1.0)
+                    d_weight = torch.tensor(1.0, device=reconstructions.device)
             else:
-                d_weight = torch.tensor(0.0)
-                g_loss = torch.tensor(0.0, requires_grad=True)
+                d_weight = torch.tensor(0.0, device=reconstructions.device)
+                g_loss = torch.tensor(0.0, requires_grad=True, device=reconstructions.device)
 
             loss = weighted_nll_loss + d_weight * self.disc_factor * g_loss
             log = dict()
@@ -286,7 +286,7 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
             if global_step >= self.discriminator_iter_start or not self.training:
                 d_loss = self.disc_factor * self.disc_loss(logits_real, logits_fake)
             else:
-                d_loss = torch.tensor(0.0, requires_grad=True)
+                d_loss = torch.tensor(0.0, requires_grad=True, device=logits_real.device)
 
             log = {
                 # OPTIMIZATION: Remove unnecessary .clone() - .detach().mean() is sufficient

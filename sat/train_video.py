@@ -45,7 +45,7 @@ def save_video_as_grid_and_mp4(
     for i, vid in enumerate(video_batch):
         gif_frames = []
         for frame in vid:
-            frame = rearrange(frame, "c h w -> h w c")
+            frame = frame.permute(1, 2, 0)  # OPTIMIZATION: Use permute instead of rearrange
             frame = (255.0 * frame).cpu().numpy().astype(np.uint8)
             gif_frames.append(frame)
         now_save_path = os.path.join(save_path, f"{i:06d}.mp4")

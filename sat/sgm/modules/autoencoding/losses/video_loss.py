@@ -56,7 +56,7 @@ def pick_video_frame(video, frame_indices):
     video = rearrange(video, "b c f ... -> b f c ...")
     batch_indices = torch.arange(batch, device=video.device).unsqueeze(1)
     images = video[batch_indices, frame_indices]
-    images = rearrange(images, "b 1 c ... -> b c ...")
+    images = images.squeeze(1)  # OPTIMIZATION: Use squeeze instead of rearrange
     return images
 
 
@@ -66,13 +66,14 @@ def gradient_penalty(images, output):
     gradients = torch_grad(
         outputs=output,
         inputs=images,
-        grad_outputs=torch.ones(output.size(), device=images.device),
+        grad_outputs=torch.ones_like(output),
         create_graph=True,
         retain_graph=True,
         only_inputs=True,
     )[0]
 
-    gradients = rearrange(gradients, "b ... -> b (...)")
+    # OPTIMIZATION: Use flatten instead of rearrange for better performance
+    gradients = gradients.flatten(1)
     return ((gradients.norm(2, dim=1) - 1) ** 2).mean()
 
 
@@ -82,7 +83,7 @@ def gradient_penalty(images, output):
 class Blur(nn.Module):
     def __init__(self):
         super().__init__()
-        f = torch.Tensor([1, 2, 1])
+        f = torch.tensor([1, 2, 1], dtype=torch.float32)  # OPTIMIZATION: Use torch.tensor with explicit dtype
         self.register_buffer("f", f)
 
     def forward(self, x, space_only=False, time_only=False):
@@ -93,23 +94,23 @@ class Blur(nn.Module):
         if space_only:
             # OPTIMIZATION: Use torch.outer instead of einsum for outer product
             f = torch.outer(f, f)
-            f = rearrange(f, "... -> 1 1 ...")
+            f = f[None, None, ...]  # OPTIMIZATION: Use indexing instead of rearrange
         elif time_only:
-            f = rearrange(f, "f -> 1 f 1 1")
+            f = f[None, :, None, None]  # OPTIMIZATION: Use indexing instead of rearrange
         else:
             # OPTIMIZATION: Use broadcasting instead of einsum for 3D outer product
             f = f[:, None, None] * f[None, :, None] * f[None, None, :]
-            f = rearrange(f, "... -> 1 ...")
+            f = f[None, ...]  # OPTIMIZATION: Use indexing instead of rearrange
 
         is_images = x.ndim == 4
 
         if is_images:
-            x = rearrange(x, "b c h w -> b c 1 h w")
+            x = x[..., None, :, :]  # OPTIMIZATION: Use indexing instead of rearrange
 
         out = filter3d(x, f, normalized=True)
 
         if is_images:
-            out = rearrange(out, "b c 1 h w -> b c h w")
+            out = out[..., 0, :, :]  # OPTIMIZATION: Use indexing instead of rearrange
 
         return out
 

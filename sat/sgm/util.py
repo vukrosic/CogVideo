@@ -114,8 +114,8 @@ def get_string_from_tuple(s):
         if s[0] == "(" and s[-1] == ")":
             # Convert the string to a tuple
             t = eval(s)
-            # Check if the type of t is tuple
-            if type(t) == tuple:
+            # OPTIMIZATION: Use isinstance() instead of type() == for proper subclass handling
+            if isinstance(t, tuple):
                 return t[0]
             else:
                 pass

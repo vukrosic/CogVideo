@@ -58,19 +58,20 @@ def get_batch(keys, value_dict, N: Union[List, ListConfig], T=None, device="cuda
                 np.repeat([value_dict["negative_prompt"]], repeats=math.prod(N)).reshape(N).tolist()
             )
         elif key == "original_size_as_tuple":
-            batch["original_size_as_tuple"] = (
-                torch.tensor([value_dict["orig_height"], value_dict["orig_width"]])
-                .to(device)
-                .repeat(*N, 1)
-            )
-        elif key == "crop_coords_top_left":
-            batch["crop_coords_top_left"] = (
-                torch.tensor([value_dict["crop_coords_top"], value_dict["crop_coords_left"]])
-                .to(device)
-                .repeat(*N, 1)
-            )
-        elif key == "aesthetic_score":
             # OPTIMIZATION: Use torch.full with device instead of tensor.to().repeat()
+            batch["original_size_as_tuple"] = torch.full(
+                (*N, 2), dtype=torch.long, device=device,
+                fill_value=0
+            )
+            batch["original_size_as_tuple"][..., 0] = value_dict["orig_height"]
+            batch["original_size_as_tuple"][..., 1] = value_dict["orig_width"]
+        elif key == "crop_coords_top_left":
+            batch["crop_coords_top_left"] = torch.zeros(
+                (*N, 2), dtype=torch.long, device=device
+            )
+            batch["crop_coords_top_left"][..., 0] = value_dict["crop_coords_top"]
+            batch["crop_coords_top_left"][..., 1] = value_dict["crop_coords_left"]
+        elif key == "aesthetic_score":
             batch["aesthetic_score"] = torch.full(
                 (*N, 1), value_dict["aesthetic_score"], dtype=torch.long, device=device
             )
@@ -79,17 +80,9 @@ def get_batch(keys, value_dict, N: Union[List, ListConfig], T=None, device="cuda
             )
 
         elif key == "target_size_as_tuple":
-            # OPTIMIZATION: Use torch.full with device instead of tensor.to().repeat()
-            batch["target_size_as_tuple"] = torch.full(
-                (*N, 2),
-                dtype=torch.long,
-                device=device,
-                fill_value=value_dict["target_height"] if value_dict["target_width"] is not None else 0,
-            )
-            # Actually for 2 values, let's keep the original approach but optimize
             batch["target_size_as_tuple"] = torch.tensor(
                 [value_dict["target_height"], value_dict["target_width"]],
-                device=device,
+                dtype=torch.long, device=device,
             ).repeat(*N, 1)
         elif key == "fps":
             batch[key] = torch.full((math.prod(N),), value_dict["fps"], dtype=torch.long, device=device)
@@ -130,7 +123,7 @@ def save_video_as_grid_and_mp4(
     for i, vid in enumerate(video_batch):
         gif_frames = []
         for frame in vid:
-            frame = rearrange(frame, "c h w -> h w c")
+            frame = frame.permute(1, 2, 0)  # OPTIMIZATION: Use permute instead of rearrange
             frame = (255.0 * frame).cpu().numpy().astype(np.uint8)
             gif_frames.append(frame)
         now_save_path = os.path.join(save_path, f"{i:06d}.mp4")

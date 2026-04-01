@@ -18,9 +18,10 @@ This guide documents the optimizations applied to the CogVideo codebase, explain
 |----------|-------------|---------|----------------|
 | Attention Kernels | SDPA replacing naive bmm | **2.77x** | 6 |
 | Activation Functions | F.silu replacing x*sigmoid(x) | **1.2-1.5x** | 8 |
-| Memory Allocations | Direct device tensor creation | **10-30%** | 15+ |
-| Redundant Operations | Removed unnecessary clones/copies | **Variable** | 10+ |
-| Data Structure | Single-pass dict iteration | **2-4x fewer ops** | 2 |
+| Memory Allocations | Direct device tensor creation | **10-30%** | 20+ |
+| Redundant Operations | Removed unnecessary clones/copies | **Variable** | 15+ |
+| Data Structure | Single-pass dict iteration, deque | **2-4x fewer ops** | 4 |
+| Tensor Operations | permute/indexing/flatten replacing rearrange | **10-20%** | 12+ |
 
 ---
 
@@ -334,12 +335,35 @@ def benchmark_attention(q, k, v, num_iters=100):
 
 ### Recent Additions
 
-- `sat/vae_modules/cp_enc_dec.py` - detach() before contiguous() order
+- `sat/sgm/modules/autoencoding/temporal_ae.py` - reshape instead of rearrange for num_frames flattening
+- `sat/sgm/modules/autoencoding/losses/video_loss.py` - torch.Tensor() -> torch.tensor() with explicit dtype
+- `sat/sgm/modules/autoencoding/magvit2_pytorch.py` - torch.Tensor() -> torch.tensor() with explicit dtype
+- `sat/sample_video.py` - torch.full with device for crop_coords_top_left, permute instead of rearrange for frame processing
+- `sat/train_video.py` - permute instead of rearrange for frame processing
+- `sat/sgm/modules/autoencoding/vqvae/quantize.py` - permute instead of rearrange for b c h w <-> b h w c
+- `sat/sgm/modules/autoencoding/regularizers/quantize.py` - permute instead of rearrange for b c h w <-> b h w c (multiple places)
+- `sat/sgm/modules/autoencoding/losses/video_loss.py` - squeeze() instead of rearrange, permute/unsqueeze/indexing
+- `sat/sgm/modules/autoencoding/magvit2_pytorch.py` - indexing instead of rearrange (cond, fmap), view instead of rearrange (fmap reshape)
+- `sat/sgm/modules/autoencoding/regularizers/lookup_free_quantization.py` - indexing and flatten instead of rearrange (multiple places)
+- `sat/sgm/modules/autoencoding/regularizers/finite_scalar_quantization.py` - indexing, flatten, and moveaxis instead of rearrange (multiple places)
+- `sat/sample_video.py` - torch.full with device for original_size_as_tuple, crop_coords_top_left, target_size_as_tuple
+- `sat/dit_video_concat.py` - device='cuda' for torch.arange in RotaryEmbedding3D initialization
+- `sat/dit_video_concat.py` - Removed redundant .cuda() calls after sin/cos (freqs already on CUDA)
 - `sat/sgm/modules/autoencoding/losses/discriminator_loss.py` - detach() before contiguous() order
+- `sat/sgm/modules/autoencoding/losses/discriminator_loss.py` - device arg for torch.tensor()
+- `sat/sgm/modules/autoencoding/losses/video_loss.py` - torch.ones_like instead of torch.ones().to()
+- `sat/sgm/modules/autoencoding/losses/video_loss.py` - flatten() instead of rearrange()
+- `sat/sgm/modules/autoencoding/magvit2_pytorch.py` - gradient_penalty use torch.ones_like
+- `sat/sgm/modules/autoencoding/magvit2_pytorch.py` - flatten() instead of rearrange()
+- `sat/sgm/modules/autoencoding/magvit2_pytorch.py` - unsqueeze instead of rearrange for batch_indices
 - `sat/sgm/modules/diffusionmodules/sampling.py` - deque with maxlen for O(1) eviction
-- `sat/sgm/modules/diffusionmodules/sampling.py` - torch.allclose for zero-check
+- `sat/sgm/modules/diffusionmodules/sampling.py` - torch.allclose for zero-check (2 places)
 - `sat/sgm/modules/autoencoding/regularizers/quantize.py` - bmm replacing einsum in GumbelQuantizer
 - `sat/sgm/modules/autoencoding/vqvae/quantize.py` - bmm replacing einsum in VectorQuantizer2
+- `sat/sgm/modules/ema.py` - Removed redundant .data access in register_buffer
+- `sat/sgm/util.py` - isinstance() instead of type() == tuple
+- `sat/sgm/modules/diffusionmodules/openaimodel.py` - isinstance() instead of type() == ListConfig
+- `sat/sgm/modules/autoencoding/lpips/model/model.py` - isinstance() instead of type() == functools.partial
 
 ### Expected Overall Impact
 

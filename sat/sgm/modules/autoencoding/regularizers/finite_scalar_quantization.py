@@ -130,18 +130,18 @@ class FSQ(Module):
 
         is_img_or_video = indices.ndim >= (3 + int(self.keep_num_codebooks_dim))
 
-        indices = rearrange(indices, "... -> ... 1")
+        indices = indices[..., None]  # OPTIMIZATION: Use indexing instead of rearrange
         codes_non_centered = (indices // self._basis) % self._levels
         codes = self._scale_and_shift_inverse(codes_non_centered)
 
         if self.keep_num_codebooks_dim:
-            codes = rearrange(codes, "... c d -> ... (c d)")
+            codes = codes.flatten(-2)  # OPTIMIZATION: Use flatten instead of rearrange
 
         if project_out:
             codes = self.project_out(codes)
 
         if is_img_or_video:
-            codes = rearrange(codes, "b ... d -> b d ...")
+            codes = codes.moveaxis(-1, 1)  # OPTIMIZATION: Use moveaxis instead of rearrange
 
         return codes
 
@@ -187,6 +187,6 @@ class FSQ(Module):
             indices = unpack_one(indices, ps, "b * c")
 
         if not self.keep_num_codebooks_dim:
-            indices = rearrange(indices, "... 1 -> ...")
+            indices = indices[..., 0]  # OPTIMIZATION: Use indexing instead of rearrange
 
         return out, indices

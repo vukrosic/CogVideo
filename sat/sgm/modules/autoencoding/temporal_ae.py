@@ -143,7 +143,7 @@ class VideoBlock(AttnBlock):
         x_mix = x
         num_frames = torch.arange(timesteps, device=x.device)
         num_frames = repeat(num_frames, "t -> b t", b=x.shape[0] // timesteps)
-        num_frames = rearrange(num_frames, "b t -> (b t)")
+        num_frames = num_frames.reshape(-1)  # OPTIMIZATION: Use reshape instead of rearrange
         t_emb = timestep_embedding(num_frames, self.in_channels, repeat_only=False)
         emb = self.video_time_embed(t_emb)  # b, n_channels
         emb = emb[:, None, :]
@@ -209,7 +209,7 @@ class MemoryEfficientVideoBlock(MemoryEfficientAttnBlock):
         x_mix = x
         num_frames = torch.arange(timesteps, device=x.device)
         num_frames = repeat(num_frames, "t -> b t", b=x.shape[0] // timesteps)
-        num_frames = rearrange(num_frames, "b t -> (b t)")
+        num_frames = num_frames.reshape(-1)  # OPTIMIZATION: Use reshape instead of rearrange
         t_emb = timestep_embedding(num_frames, self.in_channels, repeat_only=False)
         emb = self.video_time_embed(t_emb)  # b, n_channels
         emb = emb[:, None, :]
